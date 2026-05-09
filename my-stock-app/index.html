@@ -1,13 +1,277 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>�x�� AI ����j��</title>
-    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
-  </head>
-  <body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台股 AI 智能大腦 V8.8.2</title>
+    <!-- 引入 React, Tailwind 與必要的函式庫 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/lucide-static/0.344.0/lucide.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', -apple-system, sans-serif; background-color: #050b18; overflow-x: hidden; }
+        .glass { background: rgba(13, 21, 38, 0.85); backdrop-filter: blur(20px); border: 1px solid rgba(30, 45, 77, 0.5); }
+        .scan-glow { box-shadow: 0 0 30px rgba(59, 130, 246, 0.15); }
+        .tab-active { color: #60a5fa; position: relative; }
+        .tab-active::after { content: ''; position: absolute; bottom: -8px; width: 4px; height: 4px; background: #60a5fa; border-radius: 50%; }
+        /* 隱藏捲軸但保留功能 */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+    <!-- Firebase SDK 模組對照表 -->
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+      }
+    }
+    </script>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+        import { getFirestore, collection, onSnapshot, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
+
+        // 配置資訊 (已嵌入你提供的 Key)
+        const GOOGLE_AI_API_KEY = "AIzaSyDzlWLTW4PL1XyAT35u6g_wneztjE8sHXY";
+        const firebaseConfig = {
+            apiKey: "AIzaSyCKuLpm5AjitgbbQKKjGkuB694eANok84k",
+            authDomain: "k123-2b785.firebaseapp.com",
+            projectId: "k123-2b785",
+            storageBucket: "k123-2b785.firebasestorage.app",
+            messagingSenderId: "629459061220",
+            appId: "1:629459061220:web:8655e096f926066f7f6f1f"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "twse-ai-brain-final";
+
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState(0); // 0: 掃描, 1: 數據
+            const [kb, setKb] = useState([]);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [scanResult, setScanResult] = useState(null);
+
+            // 初始化登入狀態
+            useEffect(() => {
+                signInAnonymously(auth).catch(err => console.error("Firebase Login Error:", err));
+                return onAuthStateChanged(auth, setUser);
+            }, []);
+
+            // 監聽雲端數據庫
+            useEffect(() => {
+                if (!user) return;
+                const kbRef = collection(db, 'artifacts', appId, 'public', 'data', 'knowledge');
+                const q = query(kbRef);
+                return onSnapshot(q, (snapshot) => {
+                    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setKb(items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
+                }, (error) => console.error("Firestore Listen Error:", error));
+            }, [user]);
+
+            // AI 分析邏輯
+            const runAnalysis = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                setIsAnalyzing(true);
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = async () => {
+                    const base64Data = reader.result.split(',')[1];
+                    try {
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GOOGLE_AI_API_KEY}`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                contents: [{ 
+                                    parts: [
+                                        { text: "你是專業台股分析師。請分析這張 K 線圖，辨識股票代號與名稱，並給出支撐壓力位與短線操作策略。請用繁體中文回答，語氣專業嚴謹。最後請一定要包含一個 JSON 物件描述關鍵數據：{\"score\": 1-5, \"trend\": \"看多/看空/盤整\"}" }, 
+                                        { inlineData: { mimeType: "image/png", data: base64Data } }
+                                    ] 
+                                }]
+                            })
+                        });
+                        const data = await res.json();
+                        if (data.candidates && data.candidates[0]) {
+                            const report = data.candidates[0].content.parts[0].text;
+                            setScanResult(report);
+                            
+                            // 自動存入知識庫
+                            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'knowledge'), {
+                                title: `AI 分析報告 - ${new Date().toLocaleTimeString()}`,
+                                content: report.substring(0, 200) + "...",
+                                type: 'SCAN_LOG',
+                                createdAt: serverTimestamp()
+                            });
+                        } else {
+                            throw new Error("AI 回傳格式異常");
+                        }
+                    } catch (err) {
+                        setScanResult("系統錯誤: " + err.message);
+                    } finally {
+                        setIsAnalyzing(false);
+                    }
+                };
+            };
+
+            return (
+                <div className="min-h-screen text-slate-300">
+                    {/* 頂部導航 */}
+                    <nav className="fixed top-0 w-full glass z-50 px-6 py-4 flex justify-between items-center border-b border-blue-500/10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-blue-400 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                <i className="lucide-brain-circuit text-white text-lg"></i>
+                            </div>
+                            <div>
+                                <h1 className="text-xs font-black text-white tracking-widest uppercase italic leading-none">AI BRAIN</h1>
+                                <p className="text-[8px] text-blue-400 font-bold tracking-tighter">TRADING SYSTEM V8.8</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-emerald-400 bg-emerald-400/5 px-3 py-1.5 rounded-full border border-emerald-400/20 shadow-inner">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                            {user ? 'LIVE_SYSTEM_READY' : 'CONNECTING...'}
+                        </div>
+                    </nav>
+
+                    {/* 主內容區 */}
+                    <main className="max-w-md mx-auto pt-28 px-6">
+                        {activeTab === 0 ? (
+                            <div className="space-y-6">
+                                {!scanResult ? (
+                                    <div 
+                                        onClick={() => !isAnalyzing && document.getElementById('upload').click()}
+                                        className={`bg-[#0d1526]/50 rounded-[3rem] border-2 border-dashed ${isAnalyzing ? 'border-blue-500 animate-pulse' : 'border-blue-500/20'} p-14 text-center scan-glow cursor-pointer hover:bg-blue-500/5 transition-all active:scale-95`}
+                                    >
+                                        <input type="file" id="upload" hidden onChange={runAnalysis} accept="image/*" />
+                                        {isAnalyzing ? (
+                                            <div className="mb-6 text-blue-400 flex justify-center">
+                                                <i className="lucide-loader-2 text-5xl animate-spin"></i>
+                                            </div>
+                                        ) : (
+                                            <i className="lucide-aperture text-blue-500 text-6xl mb-6 mx-auto flex justify-center"></i>
+                                        )}
+                                        <h2 className="text-white font-black text-xl mb-2">{isAnalyzing ? "大腦神經元分析中" : "啟動 AI 視覺掃描"}</h2>
+                                        <p className="text-[11px] text-slate-500 tracking-wide">上傳股票 K 線截圖，AI 將自動辨識型態與策略</p>
+                                    </div>
+                                ) : (
+                                    <div className="bg-[#0d1526] rounded-[2.5rem] p-8 border border-blue-500/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <div className="flex items-center gap-2">
+                                                <i className="lucide-sparkles text-blue-400 size-4"></i>
+                                                <span className="text-blue-400 text-[10px] font-black tracking-widest uppercase">Analysis Complete</span>
+                                            </div>
+                                            <button onClick={() => setScanResult(null)} className="text-slate-600 hover:text-white transition-colors p-1">
+                                                <i className="lucide-x size-5"></i>
+                                            </button>
+                                        </div>
+                                        <div className="text-sm leading-relaxed text-slate-200 whitespace-pre-wrap font-medium">
+                                            {scanResult}
+                                        </div>
+                                        <button 
+                                            onClick={() => setScanResult(null)} 
+                                            className="w-full mt-8 py-4 bg-gradient-to-r from-blue-700 to-blue-600 rounded-2xl text-white font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-blue-900/40 active:translate-y-1 transition-all"
+                                        >
+                                            確認並清除
+                                        </button>
+                                    </div>
+                                )}
+                                
+                                {/* 提示卡片 */}
+                                {!scanResult && (
+                                    <div className="bg-blue-500/5 rounded-2xl p-4 border border-blue-500/10 flex items-start gap-3">
+                                        <i className="lucide-info text-blue-400 size-4 mt-0.5"></i>
+                                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                                            系統已與 Firebase 即時連動。所有掃描記錄將自動同步至數據頁面，供所有成員共享知識。
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-6 pb-10">
+                                <div className="flex justify-between items-end px-2">
+                                    <div>
+                                        <h3 className="text-white font-black text-lg">共享知識數據</h3>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Global Knowledge Base</p>
+                                    </div>
+                                    <span className="text-[10px] bg-white/5 text-slate-400 px-3 py-1 rounded-full border border-white/5">{kb.length} ITEMS</span>
+                                </div>
+                                
+                                {kb.length === 0 ? (
+                                    <div className="text-center py-32 space-y-4">
+                                        <i className="lucide-database text-slate-800 text-5xl flex justify-center"></i>
+                                        <p className="text-slate-600 text-[11px] font-bold uppercase tracking-widest">目前尚無數據，請先掃描上傳</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid gap-4">
+                                        {kb.map(item => (
+                                            <div key={item.id} className="bg-[#0d1526]/80 p-5 rounded-3xl border border-[#1e2d4d] hover:border-blue-500/30 transition-all group">
+                                                <div className="flex justify-between items-start mb-3">
+                                                    <div className="bg-blue-600/10 text-blue-400 text-[9px] px-2.5 py-1 rounded-lg font-black tracking-tighter border border-blue-400/10">
+                                                        {item.type || 'NOTE'}
+                                                    </div>
+                                                    <span className="text-[9px] font-mono text-slate-600">
+                                                        {item.createdAt ? new Date(item.createdAt.seconds * 1000).toLocaleString() : 'Saving...'}
+                                                    </span>
+                                                </div>
+                                                <h4 className="text-sm text-slate-100 font-bold mb-2 group-hover:text-blue-400 transition-colors">{item.title}</h4>
+                                                <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-3 italic">
+                                                    {item.content}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* 底部導航 */}
+                    <div className="fixed bottom-0 w-full glass border-t border-blue-500/10 px-10 pb-12 pt-5 flex justify-between items-center z-50">
+                        <button 
+                            onClick={() => setActiveTab(0)} 
+                            className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${activeTab === 0 ? 'tab-active scale-110' : 'text-slate-600'}`}
+                        >
+                            <i className={`lucide-search ${activeTab === 0 ? 'text-2xl' : 'text-xl'}`}></i>
+                            <span className="text-[9px] font-black uppercase tracking-tighter">視覺掃描</span>
+                        </button>
+                        
+                        <div className="w-px h-6 bg-white/5"></div>
+
+                        <button 
+                            onClick={() => setActiveTab(1)} 
+                            className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${activeTab === 1 ? 'tab-active scale-110' : 'text-slate-600'}`}
+                        >
+                            <i className={`lucide-database ${activeTab === 1 ? 'text-2xl' : 'text-xl'}`}></i>
+                            <span className="text-[9px] font-black uppercase tracking-tighter">數據中心</span>
+                        </button>
+
+                        <div className="w-px h-6 bg-white/5"></div>
+
+                        <button className="flex flex-col items-center gap-1.5 text-slate-700 cursor-not-allowed">
+                            <i className="lucide-settings text-xl"></i>
+                            <span className="text-[9px] font-black uppercase tracking-tighter text-slate-700">系統核心</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
 </html>
